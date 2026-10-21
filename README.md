@@ -10,25 +10,28 @@ Built with Python, Streamlit, PyZotero, PyMuPDF, OpenAI, and ChromaDB, the appli
 
 The application separates preparation of the literature index from answering questions. Papers are processed into a persistent local index, then relevant passages are retrieved for each question and provided to the language model as evidence.
 
+**Library preparation**
+
 ```mermaid
-flowchart TD
-    subgraph Preparation[Library preparation]
-        A[Zotero personal or group library] --> B[Download accessible PDF attachments]
-        B --> C[Extract text and page numbers]
-        C --> D[Clean text and create overlapping chunks]
-        D --> E[Generate passage embeddings]
-        E --> F[(Local ChromaDB index)]
-    end
-    subgraph Conversation[Question answering]
-        G[Question and recent conversation] --> H[Identify paper scope and resolve follow-ups]
-        H --> I[Embed the search question]
-        I --> J[Retrieve relevant passages]
-        F --> J
-        J --> K[Assemble evidence with source IDs]
-        K --> L[Generate an answer]
-        L --> M[Display answer, citations, and retrieved evidence]
-    end
+flowchart LR
+    A[Zotero library] --> B[Extract PDF text]
+    B --> C[Overlapping chunks]
+    C --> D[Passage embeddings]
+    D --> E[(ChromaDB index)]
 ```
+
+**Question answering**
+
+```mermaid
+flowchart LR
+    A[Question + history] --> B[Identify paper scope]
+    B --> C[Query rewriter]
+    C --> D[Embed query + retrieve]
+    D --> E[Generate answer]
+    E --> F[Citations + evidence]
+```
+
+Retrieval searches the ChromaDB index created during library preparation. The query rewriter makes conversational follow-ups explicit before that search.
 
 ### 1. Connect and ingest the library
 
@@ -48,15 +51,31 @@ The application sends passage text to OpenAI's **`text-embedding-3-small`** mode
 
 ChromaDB stores the embeddings alongside the original passage text and bibliographic metadata. The database persists locally, allowing later searches to reuse the index. Embedding runs skip chunk IDs already present in the collection, so newly added papers can be indexed incrementally.
 
-### 4. Interpret the question and retrieve evidence
+### 4. Identify the paper or topic
 
 For each question, the application determines whether the user is asking about a specific paper or about the literature more generally. Explicit author-year references can be matched against indexed metadata. Other requests use model-assisted identification from a bounded catalog shortlist ranked locally using question terms, recent conversation, and the active paper.
 
-When several papers match, the interface asks the user to choose one while retaining the original question. Follow-up questions can be rewritten using recent conversation context to make the search request more self-contained.
+When several papers match, the interface asks the user to choose one while retaining the original question. Once the scope is resolved, a separate query-rewriting stage prepares the search question.
+
+### 5. Rewrite conversational queries
+
+The **query rewriter**, implemented by `rewrite_question()` in `rag_answer.py`, uses `gpt-4.1-mini` to turn a follow-up into a standalone semantic search question. It receives the current question and bounded recent conversation history, with instructions to preserve the user's intent and scientific terminology without answering the question.
+
+For example, after discussing a study of surprisal and the N400 response:
+
+| Input to the conversation | Illustrative rewritten search query |
+| --- | --- |
+| “What were its limitations?” | “What were the limitations of the study on surprisal and the N400 response?” |
+
+The exact rewrite is model-generated and may vary. With no conversation history, the function returns the original question directly. For a matched paper, the application also prefixes the search query with the selected paper's title and filters retrieval to that paper's Zotero keys.
+
+The rewritten query is used for embedding and retrieval. The original question remains the request used for answer generation; when the user selects a paper after clarification, the application restores the question that prompted the clarification. Rewriting is intended to reduce ambiguity in retrieval, but its effect on accuracy has not yet been evaluated.
+
+### 6. Retrieve supporting passages
 
 The search question is embedded using the same model used for the papers. ChromaDB then retrieves similar passages, optionally filtering by the selected paper's Zotero keys. The interface retrieves eight passages by default, with an adjustable range of three to twenty. Previously cited passages explicitly referenced by source ID can also be added to the evidence.
 
-### 5. Generate an answer with inspectable citations
+### 7. Generate an answer with inspectable citations
 
 Retrieved passages are assembled into an evidence context with stable conversation-level identifiers such as `[S1]` and `[S2]`. The application provides this context, the current question, and bounded recent conversation history to **`gpt-4.1-mini`**.
 
@@ -67,7 +86,7 @@ The **Retrieved Evidence** panel displays passage text, paper titles, authors, a
 ## Design choices
 
 - **Inspectable evidence:** Retrieved text and page-level metadata are visible alongside the generated response.
-- **Conversational retrieval:** Recent context, an active paper, and stable source IDs support follow-up questions.
+- **Conversational query rewriting:** A dedicated model call turns follow-ups into standalone search queries before retrieval. An active paper and stable source IDs provide additional context.
 - **Persistent local storage:** Extracted text, chunks, and embeddings are organized by library type and ID.
 - **Versioned rebuilds:** A full rebuild creates a separate index version and switches to it only after ingestion, chunking, and embedding succeed. Earlier versions remain on disk.
 - **Shared configuration:** Model names and request size limits live in `config.py`. Stored model metadata helps prevent searches against an incompatible embedding index.
@@ -82,7 +101,7 @@ The **Retrieved Evidence** panel displays passage text, paper titles, authors, a
 | `zotero_ingest.py` | PDF retrieval, page-level text extraction, and metadata storage |
 | `chunk_papers.py` | Text cleanup and overlapping passage creation |
 | `embed_chunks.py` | Batched embedding generation and ChromaDB storage |
-| `rag_answer.py` | Paper identification, follow-up rewriting, retrieval, answer generation, and citation ID checks |
+| `rag_answer.py` | Paper identification, query rewriting, retrieval, answer generation, and citation ID checks |
 | `config.py` | Shared model settings and request limits |
 | `library_storage.py` | Active index selection, versioned rebuilds, and model compatibility checks |
 | `export_safety.py` | Restricted HTML formatting for conversation exports |
