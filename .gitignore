@@ -1,0 +1,47 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+!.env.sample
+api key.txt
+api_key.txt
+api-key.txt
+*.pem
+*.key
+.streamlit/secrets.toml
+.streamlit/secrets.*.toml
+
+# Private research data, indexes, exports, and old working copies
+/data/
+/conversations/
+/archive/
+
+# Python environments and generated files
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local editor, operating system, and log files
+.DS_Store
+._*
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.log
+
+# Local verification files
+/tests/
